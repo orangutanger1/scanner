@@ -8,7 +8,7 @@ const STORAGE_KEY = 'scanned_documents';
 
 export const [DocumentProvider, useDocuments] = createContextHook(() => {
   const [documents, setDocuments] = useState<ScannedDocument[]>([]);
-  const [batchMode, setBatchMode] = useState(false);
+  const [batchMode, setBatchMode] = useState(true);
   const [currentBatchId, setCurrentBatchId] = useState<string | null>(null);
 
   const documentsQuery = useQuery({
@@ -43,8 +43,9 @@ export const [DocumentProvider, useDocuments] = createContextHook(() => {
   const startBatch = useCallback(() => {
     const batchId = Date.now().toString();
     setCurrentBatchId(batchId);
+    setBatchMode(true);
     return batchId;
-  }, []);
+  }, [setBatchMode]);
 
   const endBatch = useCallback(() => {
     setCurrentBatchId(null);
@@ -86,5 +87,5 @@ export const [DocumentProvider, useDocuments] = createContextHook(() => {
     currentBatchId,
     startBatch,
     endBatch,
-  }), [documents, addDocument, updateDocument, deleteDocument, addPageToDocument, documentsQuery.isLoading, batchMode, currentBatchId, startBatch, endBatch]);
+  }), [documents, addDocument, updateDocument, deleteDocument, addPageToDocument, documentsQuery.isLoading, batchMode, setBatchMode, currentBatchId, startBatch, endBatch]);
 });

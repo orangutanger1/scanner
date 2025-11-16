@@ -17,7 +17,7 @@ import { useDocuments } from '../contexts/DocumentContext';
 
 export default function DocumentScreen() {
   const params = useLocalSearchParams<{ documentId: string }>();
-  const { documents, deleteDocument, updateDocument } = useDocuments();
+  const { documents, deleteDocument, updateDocument, setBatchMode } = useDocuments();
   const [isDeleting, setIsDeleting] = useState(false);
 
   const doc = documents.find((d) => d.id === params.documentId);
@@ -92,7 +92,7 @@ export default function DocumentScreen() {
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Save',
-            onPress: (newTitle) => {
+            onPress: (newTitle?: string) => {
               if (newTitle && newTitle !== doc.title) {
                 updateDocument(params.documentId, { title: newTitle });
               }
@@ -109,8 +109,13 @@ export default function DocumentScreen() {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-    router.push('/camera');
-  }, []);
+    if (!doc) return;
+    setBatchMode(true);
+    router.push({
+      pathname: '/camera',
+      params: { appendTo: doc.id },
+    });
+  }, [doc, setBatchMode]);
 
   if (!doc) {
     return (

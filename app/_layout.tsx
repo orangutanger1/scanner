@@ -1,12 +1,13 @@
-import { AnalyticsProvider } from '@rork-ai/toolkit-sdk';
-import { RorkDevWrapper } from '@rork-ai/toolkit-dev-sdk/v54';
-// template
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { StatusBar as RNStatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { DocumentProvider } from "../contexts/DocumentContext";
+import { AnalyticsProvider } from "../providers/AnalyticsProvider";
+import { DevWrapper } from "../providers/DevWrapper";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -51,20 +52,32 @@ function RootLayoutNav() {
 function RootLayout() {
   useEffect(() => {
     SplashScreen.hideAsync();
+    RNStatusBar.setHidden(true, "slide");
+
+    return () => {
+      RNStatusBar.setHidden(false, "slide");
+    };
   }, []);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <DocumentProvider>
-        <GestureHandlerRootView>
-          <RootLayoutNav />
-        </GestureHandlerRootView>
-      </DocumentProvider>
-    </QueryClientProvider>
+    <>
+      <StatusBar hidden translucent animated style="light" />
+      <QueryClientProvider client={queryClient}>
+        <DocumentProvider>
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <RootLayoutNav />
+          </GestureHandlerRootView>
+        </DocumentProvider>
+      </QueryClientProvider>
+    </>
   );
 }
-export default function RorkRootLayoutWrapper() {
+export default function RootLayoutWrapper() {
   return (
-    <AnalyticsProvider><RorkDevWrapper><RootLayout /></RorkDevWrapper></AnalyticsProvider>
+    <AnalyticsProvider>
+      <DevWrapper>
+        <RootLayout />
+      </DevWrapper>
+    </AnalyticsProvider>
   );
 }

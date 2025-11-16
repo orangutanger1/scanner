@@ -1,26 +1,71 @@
 import { Image } from 'expo-image';
 import { router, Stack } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Dimensions,
+  FlatList,
+  Keyboard,
+  LayoutAnimation,
+  Platform,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
+  UIManager,
   View,
-  FlatList,
-  Dimensions,
-  Platform,
 } from 'react-native';
-import { FileText, Plus, Search } from 'lucide-react-native';
+import { FileText, Plus, Search, Trash2, X } from 'lucide-react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { useDocuments } from '../contexts/DocumentContext';
 import type { ScannedDocument } from '../types/document';
 
 const { width } = Dimensions.get('window');
-const ITEM_WIDTH = (width - 60) / 2;
+const SEARCH_BAR_WIDTH = Math.min(width - 80, 320);
 
 export default function HomeScreen() {
-  const { documents, isLoading } = useDocuments();
+  const { documents, isLoading, deleteDocument } = useDocuments();
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchActive, setIsSearchActive] = useState(false);
+  const searchInputRef = useRef<TextInput | null>(null);
+  const trimmedQuery = searchQuery.trim();
+
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isSearchActive) {
+      searchInputRef.current?.focus();
+    }
+  }, [isSearchActive]);
+
+  const filteredDocuments = useMemo(() => {
+    if (!trimmedQuery) {
+      return documents;
+    }
+
+    const query = trimmedQuery.toLowerCase();
+    return documents.filter((document) =>
+      document.title.toLowerCase().includes(query)
+    );
+  }, [documents, trimmedQuery]);
+
+  const sortedDocuments = useMemo(() => {
+    return [...filteredDocuments].sort((a, b) => b.createdAt - a.createdAt);
+  }, [filteredDocuments]);
+
+  const showBaseEmpty = !isLoading && documents.length === 0 && trimmedQuery.length === 0;
+  const showSearchEmpty = !isLoading && trimmedQuery.length > 0 && sortedDocuments.length === 0;
+
+  const animateSearchToggle = useCallback(() => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+  }, []);
 
   const handleNewScan = useCallback(() => {
     if (Platform.OS !== 'web') {
@@ -29,11 +74,26 @@ export default function HomeScreen() {
     router.push('/camera');
   }, []);
 
-  const handleSearch = useCallback(() => {
+  const handleActivateSearch = useCallback(() => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    console.log('Search pressed - implement search functionality');
+    animateSearchToggle();
+    setIsSearchActive(true);
+  }, [animateSearchToggle]);
+
+  const handleCancelSearch = useCallback(() => {
+    if (Platform.OS !== 'web') {
+      Haptics.selectionAsync();
+    }
+    animateSearchToggle();
+    setIsSearchActive(false);
+    setSearchQuery('');
+    Keyboard.dismiss();
+  }, [animateSearchToggle]);
+
+  const handleClearQuery = useCallback(() => {
+    setSearchQuery('');
   }, []);
 
   const handleDocumentPress = useCallback((doc: ScannedDocument) => {
@@ -46,51 +106,92 @@ export default function HomeScreen() {
     });
   }, []);
 
+  const handleDeleteDocument = useCallback((docId: string) => {
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    deleteDocument(docId);
+  }, [deleteDocument]);
+
   const renderDocument = useCallback(({ item }: { item: ScannedDocument }) => {
-    const date = new Date(item.createdAt).toLocaleDateString('en-US', {
+    const created = new Date(item.createdAt);
+    const createdLabel = created.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
+      year: 'numeric',
     });
+    const timeLabel = created.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+    const previewUri = item.thumbnail ?? item.pages[0]?.uri;
 
     return (
-      <TouchableOpacity
-        style={styles.documentItem}
-        onPress={() => handleDocumentPress(item)}
+      <Swipeable
+        overshootRight={false}
+        renderRightActions={() => (
+          <TouchableOpacity
+            style={styles.deleteAction}
+            onPress={() => handleDeleteDocument(item.id)}
+          >
+            <Trash2 size={20} color="#FFFFFF" strokeWidth={2.5} />
+            <Text style={styles.deleteActionText}>Remove</Text>
+          </TouchableOpacity>
+        )}
       >
-        <View style={styles.documentThumbnail}>
-          {item.thumbnail ? (
-            <Image
-              source={{ uri: item.thumbnail }}
-              style={styles.thumbnailImage}
-              contentFit="cover"
-            />
-          ) : (
-            <View style={styles.placeholderThumbnail}>
-              <FileText size={40} color="#CCCCCC" strokeWidth={1.5} />
+        <TouchableOpacity
+          style={styles.documentRow}
+          onPress={() => handleDocumentPress(item)}
+        >
+          <View style={styles.previewContainer}>
+            {previewUri ? (
+              <Image
+                source={{ uri: previewUri }}
+                style={styles.previewImage}
+                contentFit="cover"
+              />
+            ) : (
+              <View style={styles.placeholderThumbnail}>
+                <FileText size={32} color="#CCCCCC" strokeWidth={1.5} />
+              </View>
+            )}
+          </View>
+          <View style={styles.documentInfo}>
+            <Text style={styles.documentTitle} numberOfLines={2}>
+              {item.title}
+            </Text>
+            <View style={styles.metaRow}>
+              <Text style={styles.metaPrimary}>{createdLabel}</Text>
+              <View style={styles.metaDot} />
+              <Text style={styles.metaSecondary}>{timeLabel}</Text>
             </View>
-          )}
-        </View>
-        <View style={styles.documentInfo}>
-          <Text style={styles.documentTitle} numberOfLines={2}>
-            {item.title}
-          </Text>
-          <Text style={styles.documentMeta}>
-            {item.pages.length} {item.pages.length === 1 ? 'page' : 'pages'} • {date}
-          </Text>
-        </View>
-      </TouchableOpacity>
+            <Text style={styles.metaSecondary}>
+              {item.pages.length} {item.pages.length === 1 ? 'page' : 'pages'} • Last updated {new Date(item.updatedAt).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+              })}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </Swipeable>
     );
-  }, [handleDocumentPress]);
+  }, [handleDeleteDocument, handleDocumentPress]);
 
-  const renderEmpty = useCallback(() => (
-    <View style={styles.emptyContainer}>
-      <FileText size={64} color="#CCCCCC" strokeWidth={1.5} />
-      <Text style={styles.emptyTitle}>No documents yet</Text>
-      <Text style={styles.emptyText}>
-        Tap the + button to scan your first document
-      </Text>
-    </View>
-  ), []);
+  const renderSearchEmpty = useCallback(() => {
+    if (!showSearchEmpty) {
+      return null;
+    }
+
+    return (
+      <View style={styles.emptySearchContainer}>
+        <Search size={56} color="#CCCCCC" strokeWidth={1.5} />
+        <Text style={styles.emptyTitle}>No matches</Text>
+        <Text style={styles.emptyText}>
+          {`We couldn't find any documents for "${trimmedQuery}".`}
+        </Text>
+      </View>
+    );
+  }, [showSearchEmpty, trimmedQuery]);
 
   return (
     <View style={styles.container}>
@@ -99,29 +200,90 @@ export default function HomeScreen() {
           title: 'My Scans',
           headerLargeTitle: true,
           headerLeft: () => (
-            <TouchableOpacity
-              style={styles.searchButton}
-              onPress={handleSearch}
-            >
-              <Search size={24} color="#007AFF" strokeWidth={2.5} />
-            </TouchableOpacity>
+            <View style={styles.headerLeftContainer}>
+              {isSearchActive ? (
+                <>
+                  <View
+                    style={[styles.searchBar, { width: SEARCH_BAR_WIDTH }]}
+                    accessible
+                    accessibilityRole="search"
+                    accessibilityLabel="Search documents"
+                  >
+                    <Search size={18} color="#8E8E93" strokeWidth={2} />
+                    <TextInput
+                      ref={searchInputRef}
+                      style={styles.searchInput}
+                      placeholder="Search documents"
+                      placeholderTextColor="#8E8E93"
+                      value={searchQuery}
+                      onChangeText={setSearchQuery}
+                      returnKeyType="search"
+                      autoCorrect={false}
+                      autoCapitalize="none"
+                    />
+                    {searchQuery.length > 0 && (
+                      <TouchableOpacity
+                        onPress={handleClearQuery}
+                        style={styles.clearButton}
+                        accessibilityRole="button"
+                        accessibilityLabel="Clear search"
+                      >
+                        <X size={16} color="#8E8E93" strokeWidth={2.5} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={handleCancelSearch}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel search"
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={styles.searchButton}
+                  onPress={handleActivateSearch}
+                  accessibilityRole="button"
+                  accessibilityLabel="Search documents"
+                >
+                  <Search size={24} color="#007AFF" strokeWidth={2.5} />
+                </TouchableOpacity>
+              )}
+            </View>
           ),
         }}
       />
 
-      <FlatList
-        data={documents}
-        renderItem={renderDocument}
-        keyExtractor={(item) => item.id}
-        numColumns={2}
-        contentContainerStyle={[
-          styles.list,
-          documents.length === 0 && styles.listEmpty,
-        ]}
-        columnWrapperStyle={documents.length > 0 ? styles.row : undefined}
-        ListEmptyComponent={!isLoading ? renderEmpty : null}
-        showsVerticalScrollIndicator={false}
-      />
+      {showBaseEmpty ? (
+        <View style={styles.emptyFixedWrapper}>
+          <View style={styles.emptyContainer}>
+            <FileText size={64} color="#CCCCCC" strokeWidth={1.5} />
+            <Text style={styles.emptyTitle}>No documents yet</Text>
+            <Text style={styles.emptyText}>
+              Tap the + button to scan your first document
+            </Text>
+          </View>
+        </View>
+      ) : (
+        <FlatList
+          data={sortedDocuments}
+          renderItem={renderDocument}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={[
+            styles.list,
+            !isLoading && sortedDocuments.length === 0 && styles.listEmpty,
+          ]}
+          contentInsetAdjustmentBehavior="automatic"
+          ListHeaderComponent={
+            sortedDocuments.length > 0 ? <View style={styles.listHeaderSpacer} /> : null
+          }
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ListEmptyComponent={renderSearchEmpty}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
 
       <View style={styles.fabContainer}>
         <TouchableOpacity
@@ -147,62 +309,147 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: -8,
   },
+  headerLeftContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    maxWidth: width - 32,
+  },
+  searchBar: {
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  searchInput: {
+    flex: 1,
+    marginHorizontal: 8,
+    paddingVertical: 0,
+    fontSize: 15,
+    color: '#000000',
+  },
+  clearButton: {
+    padding: 4,
+  },
+  cancelButton: {
+    marginLeft: 12,
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    color: '#007AFF',
+  },
   list: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    gap: 16,
   },
   listEmpty: {
     flex: 1,
   },
-  row: {
-    justifyContent: 'space-between',
-    marginBottom: 20,
+  listHeaderSpacer: {
+    height: 12,
   },
-  documentItem: {
-    width: ITEM_WIDTH,
+  separator: {
+    height: 16,
+  },
+  deleteAction: {
+    width: 96,
+    marginVertical: 4,
+    borderRadius: 16,
+    backgroundColor: '#FF3B30',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteActionText: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+  },
+  documentRow: {
+    flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    overflow: 'hidden',
+    borderRadius: 16,
+    padding: 12,
+    gap: 12,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
     elevation: 3,
   },
-  documentThumbnail: {
-    width: '100%',
-    height: ITEM_WIDTH * 1.4,
-    backgroundColor: '#F5F5F5',
+  previewContainer: {
+    width: 96,
+    height: 128,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#F0F0F0',
   },
-  thumbnailImage: {
+  previewImage: {
     width: '100%',
     height: '100%',
   },
   placeholderThumbnail: {
-    width: '100%',
-    height: '100%',
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#F0F0F0',
   },
   documentInfo: {
-    padding: 12,
-    gap: 4,
+    flex: 1,
+    justifyContent: 'center',
+    gap: 8,
   },
   documentTitle: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '600',
     color: '#000000',
-    lineHeight: 20,
+    lineHeight: 22,
   },
-  documentMeta: {
-    fontSize: 13,
-    color: '#666666',
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  metaPrimary: {
+    fontSize: 14,
+    color: '#0A0A0A',
+    fontWeight: '600',
+  },
+  metaDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#C7C7CC',
+  },
+  metaSecondary: {
+    fontSize: 14,
+    color: '#6B6B6B',
+  },
+  emptyFixedWrapper: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
   },
   emptyContainer: {
-    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  emptySearchContainer: {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
     paddingHorizontal: 40,
+    paddingVertical: 60,
   },
   emptyTitle: {
     fontSize: 22,
