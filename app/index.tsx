@@ -15,18 +15,22 @@ import {
   UIManager,
   View,
 } from 'react-native';
-import { FileText, Plus, Search, Trash2, X } from 'lucide-react-native';
+import { FileText, Plus, Search, Trash2, X, LayoutGrid, List as ListIcon } from 'lucide-react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useDocuments } from '../contexts/DocumentContext';
 import type { ScannedDocument } from '../types/document';
 
 const { width } = Dimensions.get('window');
-const SEARCH_BAR_WIDTH = Math.min(width - 80, 320);
+const EXPANDED_SEARCH_BAR_WIDTH = Math.min(width - 140, 320);
+const GRID_COLUMNS = 3;
+const GRID_GAP = 12;
+const GRID_ITEM_WIDTH = (width - 32 - GRID_GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
 
 export default function HomeScreen() {
   const { documents, isLoading, deleteDocument } = useDocuments();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchActive, setIsSearchActive] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const searchInputRef = useRef<TextInput | null>(null);
   const trimmedQuery = searchQuery.trim();
 
@@ -96,6 +100,13 @@ export default function HomeScreen() {
     setSearchQuery('');
   }, []);
 
+  const handleToggleViewMode = useCallback(() => {
+    if (Platform.OS !== 'web') {
+      Haptics.selectionAsync();
+    }
+    setViewMode((prev) => (prev === 'list' ? 'grid' : 'list'));
+  }, []);
+
   const handleDocumentPress = useCallback((doc: ScannedDocument) => {
     if (Platform.OS !== 'web') {
       Haptics.selectionAsync();
@@ -113,18 +124,62 @@ export default function HomeScreen() {
     deleteDocument(docId);
   }, [deleteDocument]);
 
-  const renderDocument = useCallback(({ item }: { item: ScannedDocument }) => {
+  const renderDocument = useCallback(({ item, index }: { item: ScannedDocument; index: number }) => {
     const created = new Date(item.createdAt);
     const createdLabel = created.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
     });
-    const timeLabel = created.toLocaleTimeString('en-US', {
+    const createdTime = created.toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',
     });
+    const isoDate = created.toISOString().slice(0, 10);
     const previewUri = item.thumbnail ?? item.pages[0]?.uri;
+    const scanLabel = `${item.pages.length} ${item.pages.length === 1 ? 'scan' : 'scans'}`;
+    const metadataLine = `${createdLabel} • ${createdTime} • ${scanLabel}`;
+  const gridMetadataLine = `${isoDate} ${createdTime}`;
+
+    if (viewMode === 'grid') {
+      const gridItemStyles = [
+        styles.gridItem,
+        ((index + 1) % GRID_COLUMNS !== 0 ? styles.gridItemSpacing : undefined),
+      ];
+
+      return (
+        <TouchableOpacity
+          style={gridItemStyles}
+          onPress={() => handleDocumentPress(item)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.gridPreviewContainer}>
+            {previewUri ? (
+              <Image
+                source={{ uri: previewUri }}
+                style={styles.gridPreviewImage}
+                contentFit="cover"
+              />
+            ) : (
+              <View style={styles.gridPlaceholder}>
+                <FileText size={32} color="#CCCCCC" strokeWidth={1.5} />
+              </View>
+            )}
+            <View style={styles.gridPageCountBadge}>
+              <Text style={styles.gridPageCountText}>{item.pages.length}</Text>
+            </View>
+          </View>
+          <View style={styles.gridInfo}>
+            <Text style={styles.gridTitle} numberOfLines={2}>
+              {item.title}
+            </Text>
+            <Text style={styles.gridMetadata} numberOfLines={2}>
+              {gridMetadataLine}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      );
+    }
 
     return (
       <Swipeable
@@ -152,30 +207,25 @@ export default function HomeScreen() {
               />
             ) : (
               <View style={styles.placeholderThumbnail}>
-                <FileText size={32} color="#CCCCCC" strokeWidth={1.5} />
+                <FileText size={24} color="#CCCCCC" strokeWidth={1.5} />
               </View>
             )}
+            <View style={styles.previewBadge}>
+              <Text style={styles.previewBadgeText}>{item.pages.length}</Text>
+            </View>
           </View>
           <View style={styles.documentInfo}>
-            <Text style={styles.documentTitle} numberOfLines={2}>
+            <Text style={styles.documentTitle} numberOfLines={1}>
               {item.title}
             </Text>
-            <View style={styles.metaRow}>
-              <Text style={styles.metaPrimary}>{createdLabel}</Text>
-              <View style={styles.metaDot} />
-              <Text style={styles.metaSecondary}>{timeLabel}</Text>
-            </View>
-            <Text style={styles.metaSecondary}>
-              {item.pages.length} {item.pages.length === 1 ? 'page' : 'pages'} • Last updated {new Date(item.updatedAt).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-              })}
+            <Text style={styles.metaLine} numberOfLines={1}>
+              {metadataLine}
             </Text>
           </View>
         </TouchableOpacity>
       </Swipeable>
     );
-  }, [handleDeleteDocument, handleDocumentPress]);
+  }, [handleDeleteDocument, handleDocumentPress, viewMode]);
 
   const renderSearchEmpty = useCallback(() => {
     if (!showSearchEmpty) {
@@ -200,11 +250,11 @@ export default function HomeScreen() {
           title: 'My Scans',
           headerLargeTitle: true,
           headerLeft: () => (
-            <View style={styles.headerLeftContainer}>
+            <View style={[styles.headerLeftContainer, isSearchActive && styles.headerLeftExpanded]}>
               {isSearchActive ? (
                 <>
                   <View
-                    style={[styles.searchBar, { width: SEARCH_BAR_WIDTH }]}
+                    style={[styles.searchBar, { width: EXPANDED_SEARCH_BAR_WIDTH }]}
                     accessible
                     accessibilityRole="search"
                     accessibilityLabel="Search documents"
@@ -253,6 +303,21 @@ export default function HomeScreen() {
               )}
             </View>
           ),
+          headerRight: () => (
+            <TouchableOpacity
+              onPress={handleToggleViewMode}
+              style={styles.viewToggle}
+              accessibilityRole="button"
+              accessibilityLabel={viewMode === 'list' ? 'Switch to grid view' : 'Switch to list view'}
+              accessibilityHint="Toggles between compact list and grid layouts"
+            >
+              {viewMode === 'list' ? (
+                <LayoutGrid size={24} color="#007AFF" strokeWidth={2} />
+              ) : (
+                <ListIcon size={24} color="#007AFF" strokeWidth={2} />
+              )}
+            </TouchableOpacity>
+          ),
         }}
       />
 
@@ -268,9 +333,12 @@ export default function HomeScreen() {
         </View>
       ) : (
         <FlatList
+          key={viewMode}
           data={sortedDocuments}
           renderItem={renderDocument}
           keyExtractor={(item) => item.id}
+          numColumns={viewMode === 'grid' ? GRID_COLUMNS : 1}
+          columnWrapperStyle={viewMode === 'grid' ? styles.gridColumnWrapper : undefined}
           contentContainerStyle={[
             styles.list,
             !isLoading && sortedDocuments.length === 0 && styles.listEmpty,
@@ -313,6 +381,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     maxWidth: width - 32,
+    flexShrink: 1,
+  },
+  headerLeftExpanded: {
+    paddingRight: 48,
   },
   searchBar: {
     height: 36,
@@ -344,10 +416,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#007AFF',
   },
+  viewToggle: {
+    padding: 8,
+    marginRight: -8,
+  },
   list: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    gap: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 100,
+    gap: 12,
   },
   listEmpty: {
     flex: 1,
@@ -356,41 +432,49 @@ const styles = StyleSheet.create({
     height: 12,
   },
   separator: {
-    height: 16,
+    height: 0, // Handled by gap in list style
+  },
+  gridColumnWrapper: {
+    justifyContent: 'flex-start',
   },
   deleteAction: {
-    width: 96,
-    marginVertical: 4,
-    borderRadius: 16,
+    width: 80,
+    marginVertical: 0,
+    borderRadius: 12,
     backgroundColor: '#FF3B30',
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 8,
   },
   deleteActionText: {
     marginTop: 4,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: '#FFFFFF',
-    letterSpacing: 0.3,
   },
   documentRow: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 12,
-    gap: 12,
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 10,
+    alignItems: 'center',
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   previewContainer: {
-    width: 96,
-    height: 128,
-    borderRadius: 12,
+    width: 48,
+    height: 64,
+    borderRadius: 8,
     overflow: 'hidden',
-    backgroundColor: '#F0F0F0',
+    backgroundColor: '#F2F2F7',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E5E5EA',
+    position: 'relative',
   },
   previewImage: {
     width: '100%',
@@ -400,38 +484,99 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F0F0F0',
+    backgroundColor: '#F2F2F7',
   },
   documentInfo: {
     flex: 1,
     justifyContent: 'center',
-    gap: 8,
+    gap: 2,
   },
   documentTitle: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '600',
     color: '#000000',
-    lineHeight: 22,
+    letterSpacing: -0.3,
   },
-  metaRow: {
-    flexDirection: 'row',
+  metaLine: {
+    fontSize: 12,
+    color: '#6D6D72',
+  },
+  previewBadge: {
+    position: 'absolute',
+    right: 4,
+    bottom: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  previewBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  // Grid Styles
+  gridItem: {
+    width: GRID_ITEM_WIDTH,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 8,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    marginBottom: GRID_GAP,
+  },
+  gridItemSpacing: {
+    marginRight: GRID_GAP,
+  },
+  gridPreviewContainer: {
+    width: '100%',
+    aspectRatio: 0.65,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#F2F2F7',
+    marginBottom: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E5E5EA',
+  },
+  gridPreviewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  gridPlaceholder: {
+    flex: 1,
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'center',
   },
-  metaPrimary: {
-    fontSize: 14,
-    color: '#0A0A0A',
+  gridPageCountBadge: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  gridPageCountText: {
+    color: '#FFFFFF',
+    fontSize: 11,
     fontWeight: '600',
   },
-  metaDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#C7C7CC',
+  gridInfo: {
+    gap: 2,
   },
-  metaSecondary: {
+  gridTitle: {
     fontSize: 14,
-    color: '#6B6B6B',
+    fontWeight: '600',
+    color: '#000000',
+    letterSpacing: -0.2,
+  },
+  gridMetadata: {
+    fontSize: 11,
+    color: '#8E8E93',
+    textAlign: 'center',
   },
   emptyFixedWrapper: {
     flex: 1,

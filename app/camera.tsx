@@ -1,4 +1,6 @@
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -22,6 +24,7 @@ export default function CameraScreen() {
   const [isCapturing, setIsCapturing] = useState(false);
   const [batchPages, setBatchPages] = useState<ScannedPage[]>([]);
   const cameraRef = useRef<CameraView>(null);
+  const [cameraReady, setCameraReady] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const { addDocument, batchMode, setBatchMode, startBatch, endBatch, addPageToDocument } = useDocuments();
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
@@ -78,8 +81,54 @@ export default function CameraScreen() {
     pulseAnim.setValue(1);
   }, [pulseAnim]);
 
+  const addPageToSession = useCallback((page: ScannedPage) => {
+    const appendedToExisting = Boolean(appendDocumentId);
+
+    if (appendDocumentId) {
+      addPageToDocument(appendDocumentId, page);
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    }
+
+    if (batchMode) {
+      if (!appendDocumentId) {
+        if (!activeBatchId) {
+          const doc: ScannedDocument = {
+            id: Date.now().toString(),
+            title: `Scan ${new Date().toLocaleDateString()}`,
+            pages: [page],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            thumbnail: page.uri,
+          };
+          addDocument(doc);
+          setActiveBatchId(doc.id);
+        } else {
+          addPageToDocument(activeBatchId, page);
+        }
+      }
+
+      setBatchPages((prev) => [...prev, page]);
+    } else if (!appendedToExisting) {
+      const doc: ScannedDocument = {
+        id: Date.now().toString(),
+        title: `Scan ${new Date().toLocaleDateString()}`,
+        pages: [page],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        thumbnail: page.uri,
+      };
+
+      addDocument(doc);
+      router.back();
+    } else {
+      router.back();
+    }
+  }, [appendDocumentId, addDocument, addPageToDocument, activeBatchId, batchMode]);
+
   const handleCapture = useCallback(async () => {
-    if (!cameraRef.current || isCapturing) return;
+    if (!cameraRef.current || isCapturing || !cameraReady) return;
 
     if (Platform.OS !== 'web') {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -102,56 +151,14 @@ export default function CameraScreen() {
           timestamp: Date.now(),
         };
 
-        const appendedToExisting = Boolean(appendDocumentId);
-
-        if (appendDocumentId) {
-          addPageToDocument(appendDocumentId, page);
-          if (Platform.OS !== 'web') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          }
-        }
-
-        if (batchMode) {
-          if (!appendDocumentId) {
-            if (!activeBatchId) {
-              const doc: ScannedDocument = {
-                id: Date.now().toString(),
-                title: `Scan ${new Date().toLocaleDateString()}`,
-                pages: [page],
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
-                thumbnail: photo.uri,
-              };
-              addDocument(doc);
-              setActiveBatchId(doc.id);
-            } else {
-              addPageToDocument(activeBatchId, page);
-            }
-          }
-
-          setBatchPages((prev) => [...prev, page]);
-        } else if (!appendedToExisting) {
-          const doc: ScannedDocument = {
-            id: Date.now().toString(),
-            title: `Scan ${new Date().toLocaleDateString()}`,
-            pages: [page],
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            thumbnail: photo.uri,
-          };
-
-          addDocument(doc);
-          router.back();
-        } else {
-          router.back();
-        }
+        addPageToSession(page);
       }
     } catch (error) {
       console.error('Error capturing photo:', error);
     } finally {
       setIsCapturing(false);
     }
-  }, [isCapturing, stopPulse, addDocument, batchMode, activeBatchId, addPageToDocument, appendDocumentId]);
+  }, [addPageToSession, cameraReady, isCapturing, stopPulse]);
 
   const handleCloseCamera = useCallback(() => {
     if (Platform.OS !== 'web') {
@@ -165,7 +172,9 @@ export default function CameraScreen() {
     setBatchPages([]);
     setActiveBatchId(null);
 
-    if (router.canGoBack()) {
+    const canGoBack = typeof router.canGoBack === 'function' ? router.canGoBack() : false;
+
+    if (canGoBack) {
       router.back();
     } else {
       router.replace('/');
@@ -180,6 +189,76 @@ export default function CameraScreen() {
     }
     handleCloseCamera();
   }, [batchMode, batchPages, handleCloseCamera]);
+
+  const handleImportFromLibrary = useCallback(async () => {
+    if (Platform.OS !== 'web') {
+      Haptics.selectionAsync();
+    }
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        quality: 1,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      result.assets.forEach((asset, index) => {
+        if (!asset.uri) {
+          return;
+        }
+
+        const page: ScannedPage = {
+          id: `${Date.now()}-library-${index}-${asset.assetId ?? Math.random().toString(36).slice(2, 6)}`,
+          uri: asset.uri,
+          filter: 'original',
+          timestamp: Date.now(),
+        };
+
+        addPageToSession(page);
+      });
+    } catch (error) {
+      console.error('Error importing from photo library:', error);
+    }
+  }, [addPageToSession]);
+
+  const handleImportFromFiles = useCallback(async () => {
+    if (Platform.OS !== 'web') {
+      Haptics.selectionAsync();
+    }
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'image/*',
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      result.assets.forEach((asset, index) => {
+        if (!asset.uri) {
+          return;
+        }
+
+        const page: ScannedPage = {
+          id: `${Date.now()}-file-${index}-${Math.random().toString(36).slice(2, 6)}`,
+          uri: asset.uri,
+          filter: 'original',
+          timestamp: Date.now(),
+        };
+
+        addPageToSession(page);
+      });
+    } catch (error) {
+      console.error('Error importing from files:', error);
+    }
+  }, [addPageToSession]);
 
   const showModeFeedback = useCallback((text: string) => {
     setModeFeedbackText(text);
@@ -262,74 +341,77 @@ export default function CameraScreen() {
         style={styles.camera} 
         facing={facing}
         flash={flashMode}
-      >
-        <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-          <View style={[styles.topSafeOverlay, { height: topInset }]} />
-          <View
-            style={[
-              styles.header,
-              styles.headerRaised,
-              { paddingTop: Math.max(topInset * 0.2, 8), paddingBottom: 10 },
-            ]}
-          >
-            <View style={styles.headerLeft}>
-              <TouchableOpacity
-                style={styles.headerButton}
-                onPress={handleCloseCamera}
-              >
-                <X size={24} color="#FFFFFF" strokeWidth={2.5} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.flashButton, flashMode !== 'off' && styles.flashButtonActive]}
-                onPress={handleCycleFlashMode}
-                accessibilityRole="button"
-                accessibilityLabel="Toggle flash mode"
-              >
-                <View style={styles.flashIconWrapper}>
-                  <Zap
-                    size={18}
-                    color={flashMode === 'off' ? '#FFFFFF' : '#FFD60A'}
-                    strokeWidth={2.5}
-                  />
-                  {flashMode === 'auto' && (
-                    <Text style={styles.flashAutoBadge}>A</Text>
-                  )}
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.headerRight}>
-              <TouchableOpacity
-                style={styles.modeButton}
-                onPress={handleToggleBatchMode}
-                accessibilityRole="switch"
-                accessibilityState={{ checked: batchMode }}
-                accessibilityLabel="Toggle batch scanning session"
-                accessibilityHint={batchMode ? 'Switch to single capture mode' : 'Switch to batch capture mode'}
-              >
-                <View style={styles.modeContent}>
-                  <View style={styles.modeIconWrapper}>
-                    <Layers size={18} color={batchMode ? '#3EB1FF' : '#FFFFFF'} strokeWidth={2.2} />
-                    {!batchMode && <View style={styles.modeSlash} />}
-                  </View>
-                  <Text
-                    style={[
-                      styles.modeLabel,
-                      batchMode ? styles.modeLabelActive : styles.modeLabelInactive,
-                    ]}
-                  >
-                    {batchMode ? 'Batch' : 'Single'}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </View>
+        onCameraReady={() => setCameraReady(true)}
+        onMountError={(error) => console.error('Camera mount error:', error)}
+      />
+      <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+        <View style={[styles.topSafeOverlay, { height: topInset }]} />
+        <View
+          style={[
+            styles.header,
+            styles.headerRaised,
+            { paddingTop: Math.max(topInset * 0.2, 8), paddingBottom: 10 },
+          ]}
+        >
+          <View style={styles.headerLeft}>
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={handleCloseCamera}
+            >
+              <X size={24} color="#FFFFFF" strokeWidth={2.5} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.flashButton, flashMode !== 'off' && styles.flashButtonActive]}
+              onPress={handleCycleFlashMode}
+              accessibilityRole="button"
+              accessibilityLabel="Toggle flash mode"
+            >
+              <View style={styles.flashIconWrapper}>
+                <Zap
+                  size={18}
+                  color={flashMode === 'off' ? '#FFFFFF' : '#FFD60A'}
+                  strokeWidth={2.5}
+                />
+                {flashMode === 'auto' && (
+                  <Text style={styles.flashAutoBadge}>A</Text>
+                )}
+              </View>
+            </TouchableOpacity>
           </View>
 
-          <Animated.View pointerEvents="none" style={[styles.modeFeedback, { opacity: modeFeedbackOpacity }]}>
-            <Text style={styles.modeFeedbackText}>{modeFeedbackText}</Text>
-          </Animated.View>
+          <View style={styles.headerRight}>
+            <TouchableOpacity
+              style={styles.modeButton}
+              onPress={handleToggleBatchMode}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: batchMode }}
+              accessibilityLabel="Toggle batch scanning session"
+              accessibilityHint={batchMode ? 'Switch to single capture mode' : 'Switch to batch capture mode'}
+            >
+              <View style={styles.modeContent}>
+                <View style={styles.modeIconWrapper}>
+                  <Layers size={18} color={batchMode ? '#3EB1FF' : '#FFFFFF'} strokeWidth={2.2} />
+                  {!batchMode && <View style={styles.modeSlash} />}
+                </View>
+                <Text
+                  style={[
+                    styles.modeLabel,
+                    batchMode ? styles.modeLabelActive : styles.modeLabelInactive,
+                  ]}
+                >
+                  {batchMode ? 'Batch' : 'Single'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
 
-          <View style={styles.controls}>
+        <Animated.View pointerEvents="none" style={[styles.modeFeedback, { opacity: modeFeedbackOpacity }]}>
+          <Text style={styles.modeFeedbackText}>{modeFeedbackText}</Text>
+        </Animated.View>
+
+        <View style={styles.controlsStack}>
+          <View style={styles.primaryControls}>
             <View style={styles.controlsInner}>
               <View style={styles.leftControl}>
                 <TouchableOpacity onPress={handleCloseCamera} disabled={isCapturing}>
@@ -367,8 +449,28 @@ export default function CameraScreen() {
               </View>
             </View>
           </View>
-        </SafeAreaView>
-      </CameraView>
+
+          <View style={styles.secondaryActions}>
+            <TouchableOpacity
+              style={[styles.secondaryButton, isCapturing && styles.secondaryButtonDisabled]}
+              onPress={handleImportFromLibrary}
+              disabled={isCapturing}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 12 }}
+            >
+              <Text style={styles.secondaryButtonText}>Photos</Text>
+            </TouchableOpacity>
+            <View style={styles.secondaryDivider} />
+            <TouchableOpacity
+              style={[styles.secondaryButton, isCapturing && styles.secondaryButtonDisabled]}
+              onPress={handleImportFromFiles}
+              disabled={isCapturing}
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 8 }}
+            >
+              <Text style={styles.secondaryButtonText}>Files</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
     </View>
   );
 }
@@ -379,10 +481,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
   camera: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
   },
   safeArea: {
     flex: 1,
+    position: 'relative',
   },
   topSafeOverlay: {
     position: 'absolute',
@@ -496,14 +603,16 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.2,
   },
-  controls: {
+  controlsStack: {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
+    bottom: 36,
     paddingHorizontal: 20,
-    paddingBottom: 30,
-    paddingTop: 16,
+  },
+  primaryControls: {
+    paddingBottom: 16,
+    paddingTop: 8,
   },
   controlsInner: {
     flexDirection: 'row',
@@ -552,6 +661,29 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#007AFF',
+  },
+  secondaryActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 18,
+  },
+  secondaryButton: {
+    paddingVertical: 6,
+  },
+  secondaryDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+  },
+  secondaryButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  secondaryButtonDisabled: {
+    opacity: 0.5,
   },
   doneButtonText: {
     fontSize: 16,

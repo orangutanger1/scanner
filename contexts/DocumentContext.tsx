@@ -34,11 +34,17 @@ export const [DocumentProvider, useDocuments] = createContextHook(() => {
     }
   }, [documentsQuery.data]);
 
+  const commitDocuments = useCallback((updater: (prev: ScannedDocument[]) => ScannedDocument[]) => {
+    setDocuments((prev) => {
+      const updated = updater(prev);
+      saveDocuments(updated);
+      return updated;
+    });
+  }, [saveDocuments]);
+
   const addDocument = useCallback((doc: ScannedDocument) => {
-    const updated = [doc, ...documents];
-    setDocuments(updated);
-    saveDocuments(updated);
-  }, [documents, saveDocuments]);
+    commitDocuments((prev) => [doc, ...prev]);
+  }, [commitDocuments]);
 
   const startBatch = useCallback(() => {
     const batchId = Date.now().toString();
@@ -53,27 +59,31 @@ export const [DocumentProvider, useDocuments] = createContextHook(() => {
   }, []);
 
   const updateDocument = useCallback((id: string, updates: Partial<ScannedDocument>) => {
-    const updated = documents.map((doc) =>
-      doc.id === id ? { ...doc, ...updates, updatedAt: Date.now() } : doc
+    commitDocuments((prev) =>
+      prev.map((doc) =>
+        doc.id === id ? { ...doc, ...updates, updatedAt: Date.now() } : doc
+      )
     );
-    setDocuments(updated);
-    saveDocuments(updated);
-  }, [documents, saveDocuments]);
+  }, [commitDocuments]);
 
   const deleteDocument = useCallback((id: string) => {
-    const updated = documents.filter((doc) => doc.id !== id);
-    setDocuments(updated);
-    saveDocuments(updated);
-  }, [documents, saveDocuments]);
+    commitDocuments((prev) => prev.filter((doc) => doc.id !== id));
+  }, [commitDocuments]);
 
   const addPageToDocument = useCallback((docId: string, page: ScannedPage) => {
-    const doc = documents.find((d) => d.id === docId);
-    if (doc) {
-      updateDocument(docId, {
-        pages: [...doc.pages, page],
-      });
-    }
-  }, [documents, updateDocument]);
+    commitDocuments((prev) =>
+      prev.map((doc) => {
+        if (doc.id !== docId) return doc;
+        const updatedPages = [...doc.pages, page];
+        return {
+          ...doc,
+          pages: updatedPages,
+          updatedAt: Date.now(),
+          thumbnail: doc.thumbnail ?? page.uri,
+        };
+      })
+    );
+  }, [commitDocuments]);
 
   return useMemo(() => ({
     documents,
