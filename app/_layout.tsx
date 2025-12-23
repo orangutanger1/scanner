@@ -15,7 +15,11 @@ const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   return (
-    <Stack screenOptions={{ headerBackTitle: "Back" }}>
+    <Stack screenOptions={{ 
+      headerBackTitle: "Back",
+      contentStyle: { backgroundColor: "#F5F5F5" },
+      headerStyle: { backgroundColor: "#F5F5F5" }
+    }}>
       <Stack.Screen 
         name="index" 
         options={{ 
@@ -42,7 +46,9 @@ function RootLayoutNav() {
         name="document" 
         options={{ 
           headerShown: true,
-          title: "Document"
+          title: "Document",
+          contentStyle: { backgroundColor: "#F5F5F5" },
+          headerStyle: { backgroundColor: "#F5F5F5" },
         }} 
       />
     </Stack>
@@ -64,7 +70,7 @@ function RootLayout() {
       <StatusBar hidden translucent animated style="light" />
       <QueryClientProvider client={queryClient}>
         <DocumentProvider>
-          <GestureHandlerRootView style={{ flex: 1 }}>
+          <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#F5F5F5' }}>
             <RootLayoutNav />
           </GestureHandlerRootView>
         </DocumentProvider>

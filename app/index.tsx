@@ -31,6 +31,7 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+  const [isNavigating, setIsNavigating] = useState(false);
   const searchInputRef = useRef<TextInput | null>(null);
   const trimmedQuery = searchQuery.trim();
 
@@ -108,14 +109,23 @@ export default function HomeScreen() {
   }, []);
 
   const handleDocumentPress = useCallback((doc: ScannedDocument) => {
+    if (isNavigating) return; // Prevent double navigation
+    
     if (Platform.OS !== 'web') {
       Haptics.selectionAsync();
     }
+    
+    setIsNavigating(true);
     router.push({
       pathname: '/document',
       params: { documentId: doc.id },
     });
-  }, []);
+    
+    // Reset the flag after navigation completes
+    setTimeout(() => {
+      setIsNavigating(false);
+    }, 500);
+  }, [isNavigating]);
 
   const handleDeleteDocument = useCallback((docId: string) => {
     if (Platform.OS !== 'web') {

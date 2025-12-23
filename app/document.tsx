@@ -15,7 +15,7 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   LayoutChangeEvent,
-  PanResponder,
+  GestureResponderEvent,
 } from 'react-native';
 import { Trash2, Edit3, PlusSquare, Upload } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,117 +30,121 @@ export default function DocumentScreen() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [activePageIndex, setActivePageIndex] = useState(0);
   const [sliderWidth, setSliderWidth] = useState(0);
-  const [sliderProgress, setSliderProgress] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const previewImageWidth = Math.max(windowWidth - 40, 260);
   const previewImageHeight = Math.min(previewImageWidth * 1.3, 520);
   const flatListRef = useRef<FlatList<any>>(null);
-  const sliderWidthRef = useRef(0);
-  const lastReportedIndex = useRef(0);
+  const sliderRef = useRef<View>(null);
+  const sliderLayoutRef = useRef({ x: 0, y: 0, width: 0 });
+  const lastHapticIndex = useRef(-1);
   const doc = documents.find((d) => d.id === params.documentId);
 
+  const sliderEnabled = Boolean(doc && doc.pages.length > 1);
+  
+  // Calculate slider progress from active page index
+  const sliderProgress = useMemo(() => {
+    if (!doc || doc.pages.length <= 1) return 0;
+    return activePageIndex / (doc.pages.length - 1);
+  }, [doc, activePageIndex]);
+
   const handlePreviewScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (!doc) return;
+    if (!doc || isDragging) return;
+
     const { contentOffset, layoutMeasurement } = event.nativeEvent;
     const pageWidth = layoutMeasurement?.width || windowWidth;
-    if (!pageWidth) {
-      return;
-    }
+    if (!pageWidth) return;
 
     const fractionalIndex = contentOffset.x / pageWidth;
     const totalPages = doc.pages.length;
-
-    if (totalPages > 1) {
-      const normalized = Math.min(
-        Math.max(fractionalIndex / (totalPages - 1), 0),
-        1
-      );
-      setSliderProgress(normalized);
-    } else {
-      setSliderProgress(0);
-    }
-
     const clampedIndex = Math.min(
       Math.max(Math.round(fractionalIndex), 0),
       Math.max(totalPages - 1, 0)
     );
 
-    if (clampedIndex !== lastReportedIndex.current) {
-      lastReportedIndex.current = clampedIndex;
+    if (clampedIndex !== activePageIndex) {
       setActivePageIndex(clampedIndex);
     }
-  }, [doc, windowWidth]);
+  }, [doc, windowWidth, isDragging, activePageIndex]);
 
   const handleSliderLayout = useCallback((event: LayoutChangeEvent) => {
-    const width = event.nativeEvent.layout.width;
-    sliderWidthRef.current = width;
+    const { width } = event.nativeEvent.layout;
     setSliderWidth(width);
+    sliderLayoutRef.current.width = width;
+    
+    // Measure the absolute position of the slider
+    if (sliderRef.current) {
+      sliderRef.current.measureInWindow((x, y) => {
+        sliderLayoutRef.current.x = x;
+        sliderLayoutRef.current.y = y;
+      });
+    }
   }, []);
 
-  const handleSliderSelect = useCallback((locationX: number) => {
-    if (!doc || doc.pages.length <= 1 || sliderWidthRef.current <= 0) {
-      return;
+  const scrollToPage = useCallback((pageIndex: number) => {
+    if (!doc) return;
+    
+    const clampedIndex = Math.min(Math.max(pageIndex, 0), doc.pages.length - 1);
+    
+    if (clampedIndex !== activePageIndex) {
+      setActivePageIndex(clampedIndex);
+      
+      // Haptic feedback when changing pages
+      if (Platform.OS !== 'web' && clampedIndex !== lastHapticIndex.current) {
+        Haptics.selectionAsync();
+        lastHapticIndex.current = clampedIndex;
+      }
     }
-
-    const clampedX = Math.min(
-      Math.max(locationX, 0),
-      sliderWidthRef.current
-    );
-    const normalized = clampedX / sliderWidthRef.current;
-    const targetIndex = Math.round(normalized * (doc.pages.length - 1));
-    const clampedIndex = Math.min(
-      Math.max(targetIndex, 0),
-      doc.pages.length - 1
-    );
-
+    
     flatListRef.current?.scrollToOffset({
       offset: clampedIndex * windowWidth,
-      animated: true,
+      animated: !isDragging, // Instant scroll while dragging, animated otherwise
     });
+  }, [doc, windowWidth, activePageIndex, isDragging]);
 
-    lastReportedIndex.current = clampedIndex;
-    setActivePageIndex(clampedIndex);
-    setSliderProgress(
-      doc.pages.length > 1 ? clampedIndex / (doc.pages.length - 1) : 0
-    );
-  }, [doc, windowWidth]);
+  const getPageIndexFromPosition = useCallback((pageX: number) => {
+    if (!doc || doc.pages.length <= 1 || sliderLayoutRef.current.width <= 0) return 0;
+    
+    const relativeX = pageX - sliderLayoutRef.current.x;
+    const clampedX = Math.min(Math.max(relativeX, 0), sliderLayoutRef.current.width);
+    const normalized = clampedX / sliderLayoutRef.current.width;
+    
+    return Math.round(normalized * (doc.pages.length - 1));
+  }, [doc]);
 
-  const sliderEnabled = Boolean(doc && doc.pages.length > 1);
+  const handleSliderTouchStart = useCallback((event: GestureResponderEvent) => {
+    if (!sliderEnabled) return;
+    
+    setIsDragging(true);
+    const pageIndex = getPageIndexFromPosition(event.nativeEvent.pageX);
+    scrollToPage(pageIndex);
+  }, [sliderEnabled, getPageIndexFromPosition, scrollToPage]);
+
+  const handleSliderTouchMove = useCallback((event: GestureResponderEvent) => {
+    if (!sliderEnabled || !isDragging) return;
+    
+    const pageIndex = getPageIndexFromPosition(event.nativeEvent.pageX);
+    scrollToPage(pageIndex);
+  }, [sliderEnabled, isDragging, getPageIndexFromPosition, scrollToPage]);
+
+  const handleSliderTouchEnd = useCallback(() => {
+    setIsDragging(false);
+    lastHapticIndex.current = -1;
+  }, []);
 
   const sliderLabelLeft = useMemo(() => {
-    if (!doc || !sliderEnabled || sliderWidth <= 0) {
-      return 0;
-    }
+    if (!doc || !sliderEnabled || sliderWidth <= 0) return 0;
     const raw = sliderWidth * sliderProgress - SLIDER_LABEL_WIDTH / 2;
     const maxLeft = Math.max(sliderWidth - SLIDER_LABEL_WIDTH, 0);
     return Math.min(Math.max(raw, 0), maxLeft);
   }, [doc, sliderEnabled, sliderWidth, sliderProgress]);
 
   const sliderLabelText = useMemo(() => {
-    if (!doc || doc.pages.length === 0) {
-      return '0/0';
-    }
+    if (!doc || doc.pages.length === 0) return '0/0';
     const current = Math.min(activePageIndex + 1, doc.pages.length);
     return `${current}/${doc.pages.length}`;
   }, [doc, activePageIndex]);
-
-  const sliderPanResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => sliderEnabled,
-        onMoveShouldSetPanResponder: () => sliderEnabled,
-        onPanResponderGrant: (evt) => {
-          if (!sliderEnabled) return;
-          handleSliderSelect(evt.nativeEvent.locationX);
-        },
-        onPanResponderMove: (evt) => {
-          if (!sliderEnabled) return;
-          handleSliderSelect(evt.nativeEvent.locationX);
-        },
-      }),
-    [sliderEnabled, handleSliderSelect]
-  );
 
   const handleExport = useCallback(async () => {
     if (!doc) return;
@@ -331,21 +335,22 @@ export default function DocumentScreen() {
                 {sliderEnabled && (
                   <View style={styles.previewSlider}>
                     <View
+                      ref={sliderRef}
                       style={styles.sliderTouchArea}
                       onLayout={handleSliderLayout}
-                      {...sliderPanResponder.panHandlers}
+                      onStartShouldSetResponder={() => true}
+                      onMoveShouldSetResponder={() => true}
+                      onResponderGrant={handleSliderTouchStart}
+                      onResponderMove={handleSliderTouchMove}
+                      onResponderRelease={handleSliderTouchEnd}
+                      onResponderTerminate={handleSliderTouchEnd}
                     >
                       <View style={styles.sliderTrackOuter}>
                         <View style={styles.sliderTrackBackground} />
                         <View
                           style={[
                             styles.sliderTrackFill,
-                            {
-                              width: Math.min(
-                                Math.max(sliderWidth * sliderProgress, 0),
-                                sliderWidth
-                              ),
-                            },
+                            { width: sliderWidth * sliderProgress },
                           ]}
                         />
                         <View
