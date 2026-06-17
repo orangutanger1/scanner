@@ -1,46 +1,37 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import createContextHook from '@nkzw/create-context-hook';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import type { ScannedDocument, ScannedPage } from '../types/document';
 
 const STORAGE_KEY = 'scanned_documents';
 
-export const [DocumentProvider, useDocuments] = createContextHook(() => {
+function useDocumentStore() {
   const [documents, setDocuments] = useState<ScannedDocument[]>([]);
   const [batchMode, setBatchMode] = useState(true);
   const [currentBatchId, setCurrentBatchId] = useState<string | null>(null);
-
-  const documentsQuery = useQuery({
-    queryKey: ['documents'],
-    queryFn: async () => {
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
-    },
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: async (docs: ScannedDocument[]) => {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
-      return docs;
-    },
-  });
-
-  const { mutate: saveDocuments } = saveMutation;
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (documentsQuery.data) {
-      setDocuments(documentsQuery.data);
-    }
-  }, [documentsQuery.data]);
+    AsyncStorage.getItem(STORAGE_KEY)
+      .then((stored) => setDocuments(stored ? JSON.parse(stored) : []))
+      .finally(() => setIsLoading(false));
+  }, []);
 
+  // write-through: every mutation persists the next state
   const commitDocuments = useCallback((updater: (prev: ScannedDocument[]) => ScannedDocument[]) => {
     setDocuments((prev) => {
       const updated = updater(prev);
-      saveDocuments(updated);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       return updated;
     });
-  }, [saveDocuments]);
+  }, []);
 
   const addDocument = useCallback((doc: ScannedDocument) => {
     commitDocuments((prev) => [doc, ...prev]);
@@ -51,7 +42,7 @@ export const [DocumentProvider, useDocuments] = createContextHook(() => {
     setCurrentBatchId(batchId);
     setBatchMode(true);
     return batchId;
-  }, [setBatchMode]);
+  }, []);
 
   const endBatch = useCallback(() => {
     setCurrentBatchId(null);
@@ -74,10 +65,9 @@ export const [DocumentProvider, useDocuments] = createContextHook(() => {
     commitDocuments((prev) =>
       prev.map((doc) => {
         if (doc.id !== docId) return doc;
-        const updatedPages = [...doc.pages, page];
         return {
           ...doc,
-          pages: updatedPages,
+          pages: [...doc.pages, page],
           updatedAt: Date.now(),
           thumbnail: doc.thumbnail ?? page.uri,
         };
@@ -91,11 +81,31 @@ export const [DocumentProvider, useDocuments] = createContextHook(() => {
     updateDocument,
     deleteDocument,
     addPageToDocument,
-    isLoading: documentsQuery.isLoading,
+    isLoading,
     batchMode,
     setBatchMode,
     currentBatchId,
     startBatch,
     endBatch,
-  }), [documents, addDocument, updateDocument, deleteDocument, addPageToDocument, documentsQuery.isLoading, batchMode, setBatchMode, currentBatchId, startBatch, endBatch]);
-});
+  }), [documents, addDocument, updateDocument, deleteDocument, addPageToDocument, isLoading, batchMode, currentBatchId, startBatch, endBatch]);
+}
+
+type DocumentStore = ReturnType<typeof useDocumentStore>;
+
+const DocumentContext = createContext<DocumentStore | null>(null);
+
+export function DocumentProvider({ children }: { children: ReactNode }) {
+  return (
+    <DocumentContext.Provider value={useDocumentStore()}>
+      {children}
+    </DocumentContext.Provider>
+  );
+}
+
+export function useDocuments() {
+  const ctx = useContext(DocumentContext);
+  if (!ctx) {
+    throw new Error('useDocuments must be used within a DocumentProvider');
+  }
+  return ctx;
+}

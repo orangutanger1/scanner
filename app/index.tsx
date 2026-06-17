@@ -47,20 +47,12 @@ export default function HomeScreen() {
     }
   }, [isSearchActive]);
 
-  const filteredDocuments = useMemo(() => {
-    if (!trimmedQuery) {
-      return documents;
-    }
-
-    const query = trimmedQuery.toLowerCase();
-    return documents.filter((document) =>
-      document.title.toLowerCase().includes(query)
-    );
-  }, [documents, trimmedQuery]);
-
   const sortedDocuments = useMemo(() => {
-    return [...filteredDocuments].sort((a, b) => b.createdAt - a.createdAt);
-  }, [filteredDocuments]);
+    const query = trimmedQuery.toLowerCase();
+    return documents
+      .filter((document) => !query || document.title.toLowerCase().includes(query))
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }, [documents, trimmedQuery]);
 
   const showBaseEmpty = !isLoading && documents.length === 0 && trimmedQuery.length === 0;
   const showSearchEmpty = !isLoading && trimmedQuery.length > 0 && sortedDocuments.length === 0;
@@ -357,7 +349,6 @@ export default function HomeScreen() {
           ListHeaderComponent={
             sortedDocuments.length > 0 ? <View style={styles.listHeaderSpacer} /> : null
           }
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
           ListEmptyComponent={renderSearchEmpty}
           showsVerticalScrollIndicator={false}
         />
@@ -440,9 +431,6 @@ const styles = StyleSheet.create({
   },
   listHeaderSpacer: {
     height: 12,
-  },
-  separator: {
-    height: 0, // Handled by gap in list style
   },
   gridColumnWrapper: {
     justifyContent: 'flex-start',

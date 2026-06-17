@@ -1,4 +1,3 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
@@ -6,12 +5,8 @@ import React, { useEffect } from "react";
 import { StatusBar as RNStatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { DocumentProvider } from "../contexts/DocumentContext";
-import { AnalyticsProvider } from "../providers/AnalyticsProvider";
-import { DevWrapper } from "../providers/DevWrapper";
 
 SplashScreen.preventAutoHideAsync();
-
-const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   return (
@@ -55,7 +50,7 @@ function RootLayoutNav() {
   );
 }
 
-function RootLayout() {
+export default function RootLayout() {
   useEffect(() => {
     SplashScreen.hideAsync();
     RNStatusBar.setHidden(true, "slide");
@@ -68,22 +63,11 @@ function RootLayout() {
   return (
     <>
       <StatusBar hidden translucent animated style="light" />
-      <QueryClientProvider client={queryClient}>
-        <DocumentProvider>
-          <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#F5F5F5' }}>
-            <RootLayoutNav />
-          </GestureHandlerRootView>
-        </DocumentProvider>
-      </QueryClientProvider>
+      <DocumentProvider>
+        <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#F5F5F5' }}>
+          <RootLayoutNav />
+        </GestureHandlerRootView>
+      </DocumentProvider>
     </>
-  );
-}
-export default function RootLayoutWrapper() {
-  return (
-    <AnalyticsProvider>
-      <DevWrapper>
-        <RootLayout />
-      </DevWrapper>
-    </AnalyticsProvider>
   );
 }

@@ -18,6 +18,18 @@ import { X, Sparkles, Layers, Zap } from 'lucide-react-native';
 import { useDocuments } from '../contexts/DocumentContext';
 import type { ScannedDocument, ScannedPage } from '../types/document';
 
+const makeDoc = (page: ScannedPage): ScannedDocument => {
+  const now = Date.now();
+  return {
+    id: now.toString(),
+    title: `Scan ${new Date().toLocaleDateString()}`,
+    pages: [page],
+    createdAt: now,
+    updatedAt: now,
+    thumbnail: page.uri,
+  };
+};
+
 export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const facing: CameraType = 'back';
@@ -94,14 +106,7 @@ export default function CameraScreen() {
     if (batchMode) {
       if (!appendDocumentId) {
         if (!activeBatchId) {
-          const doc: ScannedDocument = {
-            id: Date.now().toString(),
-            title: `Scan ${new Date().toLocaleDateString()}`,
-            pages: [page],
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            thumbnail: page.uri,
-          };
+          const doc = makeDoc(page);
           addDocument(doc);
           setActiveBatchId(doc.id);
         } else {
@@ -111,16 +116,7 @@ export default function CameraScreen() {
 
       setBatchPages((prev) => [...prev, page]);
     } else if (!appendedToExisting) {
-      const doc: ScannedDocument = {
-        id: Date.now().toString(),
-        title: `Scan ${new Date().toLocaleDateString()}`,
-        pages: [page],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        thumbnail: page.uri,
-      };
-
-      addDocument(doc);
+      addDocument(makeDoc(page));
       router.back();
     } else {
       router.back();
