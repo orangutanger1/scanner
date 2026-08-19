@@ -10,3 +10,10 @@ bun expo start / bun run start
 ```
 
 ## Features
+
+## Todo
+- Integrate the segmentation weights
+    - weights are ready
+- Implement full pipeline (OCR, summarization, etc)
+    - for ocr probably just use pp-ocr or something lightweight, summarization probably also something lightweight like deepseek flash or qwen
+- Ship app that contains all features
